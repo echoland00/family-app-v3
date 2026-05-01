@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#007AFF">
+    <link rel="manifest" href="/manifest.json">
+    <title>Family Manager Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .glass { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 overflow-x-hidden">
+    <script>
+        var __firebase_config = {"apiKey":"AIzaSyCR75E0h4YnyS4QTSaejITptFsw6ntXmHI","authDomain":"family-app-2c46b.firebaseapp.com","projectId":"family-app-2c46b","storageBucket":"family-app-2c46b.firebasestorage.app","messagingSenderId":"1040215632409","appId":"1:1040215632409:web:69b028d064226eb3485888"};
+        var __app_id = "family-app-2c46b";
+    </script>
+    <div id="app" class="min-h-screen pb-32">
+        <!-- App content will be injected here by React -->
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"></script>
+
+    <script type="text/babel">
+        
+        
+        
+        
+        
+        
+
+        
+// Make React globals available
+const { useState, useEffect, useMemo } = React;
+const { createRoot } = ReactDOM;
+
+// Firebase globals
+const { initializeApp } = firebase;
+const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = firebase.auth;
+const { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, writeBatch, query, orderBy } = firebase.firestore;
+
+// Icons - handle them differently
+const icons = lucide;
+
+const APP_VERSION = "v1.5.6-html";
+        const MEAL_TYPES = ['Breakfast', 'Lunch', 'Snack', 'Dinner'];
+        const SUGGESTED_MEALS = {
+            Breakfast: ['Avocado Toast', 'Pancakes', 'Scrambled Eggs'],
+            Lunch: ['Chicken Caesar Salad', 'Tomato Soup', 'Turkey Club'],
+            Snack: ['Fruit Bowl', 'Yogurt', 'Nuts', 'Hummus & Carrots'],
+            Dinner: ['Spaghetti Carbonara', 'Grilled Salmon', 'Thai Green Curry']
+        };
+
+        const App = () => {
+            const [isReady, setIsReady] = useState(false);
+            const [user, setUser] = useState(null);
+            const [activeTab, setActiveTab] = useState('meals');
+            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+            
+            // Profile State
+            const [activeProfile, setActiveProfile] = useState(() => {
+                const saved = localStorage.getItem('family_app_profile');
+                try { return saved ? JSON.parse(saved) : null; } catch { return null; }
+            });
+
+            // Data State
+            const [meals, setMeals] = useState([]);
+            const [groceries, setGroceries] = useState([]);
+            const [dishes, setDishes] = useState([]);
+            const [categories, setCategories] = useState([]);
+            
+            // UI State
+            const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+            const [currentCategoryId, setCurrentCategoryId] = useState(null);
+            const [editingRemark, setEditingRemark] = useState(null);
+            const [manualInputs, setManualInputs] = useState({});
+            const [newGrocery, setNewGrocery] = useState('');
+            const [newCategoryName, setNewCategoryName] = useState('');
+            const [newDishName, setNewDishName] = useState('');
+            const [quickCode, setQuickCode] = useState('');
+            const [loginError, setLoginError] = useState(null);
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'family-hub-default';
+            const firebaseConfig = typeof __firebase_config !== 'undefined'
+                ? (typeof __firebase_config === 'string' ? JSON.parse(__firebase_config) : __firebase_config)
+                : {
+                apiKey: "", authDomain: "", projectId: "", storageBucket: "", messagingSenderId: "", appId: ""
+            };
+
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+
+            useEffect(() => {
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                };
+                initAuth();
+                return onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    setIsReady(true);
+                });
+            }, []);
+
+            useEffect(() => {
+                if (!user || !activeProfile) return;
+                const hubPath = ['artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey];
+                
+                const unsubMeals = onSnapshot(collection(db, ...hubPath, 'meals'), s => setMeals(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.error(e));
+                const unsubGroc = onSnapshot(collection(db, ...hubPath, 'groceries'), s => setGroceries(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.error(e));
+                const unsubDish = onSnapshot(collection(db, ...hubPath, 'dishes'), s => setDishes(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.error(e));
+                const unsubCats = onSnapshot(collection(db, ...hubPath, 'categories'), s => setCategories(s.docs.map(d => ({id: d.id, ...d.data()}))), e => console.error(e));
+
+                return () => { unsubMeals(); unsubGroc(); unsubDish(); unsubCats(); };
+            }, [user, activeProfile]);
+
+            const getRef = (col, docId = null) => {
+                const c = collection(db, 'artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey, col);
+                return docId ? doc(c, docId) : c;
+            };
+
+            const handleQuickLogin = async () => {
+                if (quickCode.length < 4) return;
+                const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pins', quickCode));
+                if (snap.exists()) {
+                    const d = snap.data();
+                    const p = { hubKey: d.hubKey, name: d.name, phone: d.phone };
+                    localStorage.setItem('family_app_profile', JSON.stringify(p));
+                    setActiveProfile(p);
+                } else { setLoginError("Invalid PIN"); }
+            };
+
+            const addDish = async (type, name) => {
+                const val = name?.trim();
+                if (!val) return;
+                const id = `${selectedDate}_${type}`;
+                const m = meals.find(x => x.id === id);
+                const existing = Array.isArray(m?.dishes) ? m.dishes : [];
+                if (existing.includes(val)) return;
+                await setDoc(getRef('meals', id), { date: selectedDate, type, dishes: [...existing, val], lastUpdated: Date.now() }, { merge: true });
+                setManualInputs(prev => ({ ...prev, [type]: '' }));
+            };
+
+            const removeDish = async (type, idx) => {
+                const id = `${selectedDate}_${type}`;
+                const m = meals.find(x => x.id === id);
+                if (!m) return;
+                const updated = [...m.dishes];
+                updated.splice(idx, 1);
+                await updateDoc(getRef('meals', id), { dishes: updated, lastUpdated: Date.now() });
+            };
+
+            if (!isReady) return <div class="h-screen flex items-center justify-center"><span>⏳</span></div>;
+
+            if (!activeProfile) {
+                return (
+                    <div class="min-h-screen flex items-center justify-center p-6 bg-slate-50">
+                        <div class="max-w-md w-full bg-white rounded-[2.5rem] shadow-2xl p-8 border border-slate-100">
+                            <div class="flex justify-center mb-6"><div class="p-4 bg-indigo-50 rounded-2xl text-indigo-600"><span>🔑</span></div></div>
+                            <h2 class="text-2xl font-black text-center mb-8 uppercase tracking-widest">Family Planner</h2>
+                            <input type="password" placeholder="PIN CODE" class="w-full px-5 py-5 rounded-2xl bg-slate-50 border border-slate-100 outline-none text-center text-3xl font-black tracking-[0.5em] mb-4" maxLength={6} value={quickCode} onChange={e => setQuickCode(e.target.value)} />
+                            <button onClick={handleQuickLogin} class="w-full bg-indigo-600 text-white font-black py-5 rounded-2xl shadow-xl active:scale-95 transition-all">ENTER HUB</button>
+                            {loginError && <p class="text-center text-rose-500 font-black text-[10px] mt-4 uppercase">{loginError}</p>}
+                        </div>
+                    </div>
+                );
+            }
+
+            const dailyNote = meals.find(m => m.id === `${selectedDate}_planner`)?.note || '';
+
+            return (
+                <div class="max-w-lg mx-auto">
+                    <header class="glass border-b sticky top-0 z-30 px-5 py-4">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center gap-2">
+                                <div class="bg-indigo-600 p-2 rounded-xl text-white shadow-md"><span>🏠</span></div>
+                                <div>
+                                    <h1 class="text-sm font-black text-slate-900 uppercase leading-none">{activeProfile.name} Hub</h1>
+                                    <p class="text-[9px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{APP_VERSION}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsLibraryOpen(true)} class="bg-slate-900 text-white px-4 py-2 rounded-full text-[10px] font-black flex items-center gap-1.5">
+                                <span>📚</span> LIBRARY
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between gap-2 bg-slate-100/50 p-1.5 rounded-2xl">
+                            <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d.toISOString().split('T')[0]); }} class="p-2 bg-white rounded-xl shadow-sm"><span>◀</span></button>
+                            <p class="font-black text-slate-700 text-xs">{new Date(selectedDate).toLocaleDateString(undefined, {weekday: 'long', month: 'short', day: 'numeric'})}</p>
+                            <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d.toISOString().split('T')[0]); }} class="p-2 bg-white rounded-xl shadow-sm"><span>▶</span></button>
+                        </div>
+                    </header>
+
+                    <main class="p-4 space-y-6">
+                        {activeTab === 'meals' && (
+                            <div class="space-y-6">
+                                <div class="bg-amber-50 rounded-[2rem] p-6 border border-amber-100 shadow-sm">
+                                    <div class="flex items-center gap-2 mb-3">
+                                        <span class="text-amber-600">📝</span>
+                                        <span class="text-[10px] font-black text-amber-600 uppercase tracking-widest">Daily Note</span>
+                                    </div>
+                                    <textarea 
+                                        class="w-full bg-transparent border-none outline-none font-bold text-sm text-amber-900 placeholder:text-amber-200 resize-none min-h-[60px]"
+                                        placeholder="Add agenda..."
+                                        value={dailyNote}
+                                        onChange={e => setDoc(getRef('meals', `${selectedDate}_planner`), { note: e.target.value, lastUpdated: Date.now() }, { merge: true })}
+                                    />
+                                </div>
+
+                                {MEAL_TYPES.map(type => {
+                                    const m = meals.find(x => x.id === `${selectedDate}_${type}`);
+                                    const dishesList = Array.isArray(m?.dishes) ? m.dishes : [];
+                                    const isEdit = editingRemark?.type === type;
+
+                                    return (
+                                        <div key={type} class="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 relative overflow-hidden">
+                                            <div class="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500" />
+                                            <div class="flex justify-between items-center mb-4">
+                                                <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest">{type}</span>
+                                                <button onClick={() => addDish(type, SUGGESTED_MEALS[type][Math.floor(Math.random()*3)])} class="p-2 bg-purple-50 text-purple-600 rounded-xl"><span>✨</span></button>
+                                            </div>
+
+                                            <div class="flex gap-2 mb-4">
+                                                <input 
+                                                    class="flex-1 bg-slate-50 border-none px-4 py-2 rounded-xl text-sm font-bold outline-none" 
+                                                    placeholder={`Add ${type}...`}
+                                                    value={manualInputs[type] || ''}
+                                                    onChange={e => setManualInputs({...manualInputs, [type]: e.target.value})}
+                                                    onKeyDown={e => e.key === 'Enter' && addDish(type, manualInputs[type])}
+                                                />
+                                                <button onClick={() => addDish(type, manualInputs[type])} class="p-2 bg-slate-100 rounded-xl"><span>➤</span></button>
+                                            </div>
+
+                                            <div class="space-y-2 mb-4">
+                                                {dishesList.map((d, i) => (
+                                                    <div key={i} class="flex items-center justify-between bg-slate-50 px-4 py-2 rounded-xl">
+                                                        <span class="text-sm font-bold text-slate-800 break-words flex-1 pr-2">{d}</span>
+                                                        <button onClick={() => removeDish(type, i)} class="text-slate-300"><span>✕</span></button>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div class="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                                                <div class="flex justify-between mb-1">
+                                                    <span class="text-[8px] font-black uppercase text-slate-400">Details</span>
+                                                    <button onClick={() => setEditingRemark(isEdit ? null : {type, value: m?.remark || ''})} class="text-[8px] font-black uppercase text-indigo-600 underline">{isEdit ? 'Cancel' : 'Edit'}</button>
+                                                </div>
+                                                {isEdit ? (
+                                                    <div class="space-y-2">
+                                                        <textarea class="w-full bg-white border rounded-lg p-2 text-sm font-bold" rows="3" value={editingRemark.value} onChange={e => setEditingRemark({...editingRemark, value: e.target.value})} />
+                                                        <button onClick={async () => { await setDoc(getRef('meals', `${selectedDate}_${type}`), { remark: editingRemark.value, lastUpdated: Date.now() }, { merge: true }); setEditingRemark(null); }} class="w-full py-2 bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase">Save</button>
+                                                    </div>
+                                                ) : (
+                                                    <div class="text-sm font-bold text-slate-600 leading-relaxed whitespace-pre-wrap break-words w-full">
+                                                        {m?.remark || 'No extra notes...'}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {activeTab === 'groceries' && (
+                            <div class="space-y-4">
+                                <div class="flex gap-2">
+                                    <input type="text" placeholder="Buy something..." class="flex-1 px-5 py-4 rounded-2xl bg-white border outline-none font-bold text-sm" value={newGrocery} onChange={e => setNewGrocery(e.target.value)} onKeyDown={e => e.key === 'Enter' && (newGrocery && (addDoc(getRef('groceries'), {text: newGrocery, completed: false, createdAt: Date.now()}), setNewGrocery('')))} />
+                                    <button onClick={() => { if(!newGrocery) return; addDoc(getRef('groceries'), {text: newGrocery, completed: false, createdAt: Date.now()}); setNewGrocery(''); }} class="bg-indigo-600 text-white px-5 rounded-2xl"><span>＋</span></button>
+                                </div>
+                                <div class="space-y-2">
+                                    {groceries.sort((a,b) => b.createdAt - a.createdAt).map(item => (
+                                        <div key={item.id} class="bg-white p-5 rounded-2xl flex items-center gap-3 shadow-sm border border-slate-50">
+                                            <button onClick={() => updateDoc(getRef('groceries', item.id), {completed: !item.completed})}>
+                                                {item.completed ? <span>✅</span> : <span>○</span>}
+                                            </button>
+                                            <span class={`flex-1 text-sm font-bold break-words ${item.completed ? 'line-through text-slate-300' : 'text-slate-700'}`}>{item.text}</span>
+                                            <button onClick={() => deleteDoc(getRef('groceries', item.id))} class="text-slate-200 hover:text-rose-500"><span>🗑</span></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </main>
+
+                    <nav class="fixed bottom-0 left-0 right-0 glass border-t px-10 py-5 pb-9 flex justify-between items-center z-40">
+                        <button onClick={() => setActiveTab('meals')} class={`flex flex-col items-center gap-1.5 ${activeTab === 'meals' ? 'text-indigo-600' : 'text-slate-300'}`}>
+                            <span>🍽️</span><span class="text-[9px] font-black uppercase">Meals</span>
+                        </button>
+                        <button onClick={() => setActiveTab('groceries')} class={`flex flex-col items-center gap-1.5 ${activeTab === 'groceries' ? 'text-indigo-600' : 'text-slate-300'}`}>
+                            <span>🛒</span><span class="text-[9px] font-black uppercase">Groc</span>
+                        </button>
+                        <button onClick={() => setActiveProfile(null)} class="flex flex-col items-center gap-1.5 text-slate-300">
+                            <span>👤</span><span class="text-[9px] font-black uppercase">Exit</span>
+                        </button>
+                    </nav>
+                </div>
+            );
+        };
+
+        const container = document.getElementById('app');
+        // Use legacy render for React UMD compatibility.
+        ReactDOM.render(React.createElement(App), container);
+    </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').catch((error) => {
+                    console.log('SW registration failed:', error);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
