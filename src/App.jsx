@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDoc, onSnapshot, addDoc, updateDoc, deleteDoc, writeBatch, query, orderBy } from 'firebase/firestore';
+import * as XLSX from 'xlsx';
 
 import { 
   Utensils, ShoppingCart, Plus, CheckCircle2, Circle, Trash2, RefreshCw,
@@ -63,11 +64,14 @@ export default function App() {
   const [newDishName, setNewDishName] = useState('');
   const [selectingFor, setSelectingFor] = useState(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [importPendingList, setImportPendingList] = useState([]);
 
   const [editingRemark, setEditingRemark] = useState(null);
   const [manualInputs, setManualInputs] = useState({});
   const [newPin, setNewPin] = useState('');
   const [newGrocery, setNewGrocery] = useState('');
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
 
   const firebaseRefs = useMemo(() => {
     try {
@@ -191,6 +195,24 @@ export default function App() {
     setNewCategoryName('');
   };
 
+  const handleEditCategory = async () => {
+    if (!editingCategory || !editingCategoryName.trim()) return;
+    await updateDoc(doc(firebaseRefs.db, 'artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey, 'categories', editingCategory), { name: editingCategoryName.trim() });
+    setEditingCategory(null);
+    setEditingCategoryName('');
+  };
+
+  const handleDeleteCategory = async (catId) => {
+    if (!window.confirm('Delete this category and all its dishes?')) return;
+    // Delete all dishes in this category
+    const dishesToDelete = (dishes || []).filter(d => d.categoryId === catId);
+    const batch = writeBatch(firebaseRefs.db);
+    dishesToDelete.forEach(d => batch.delete(doc(firebaseRefs.db, 'artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey, 'dishes', d.id)));
+    batch.delete(doc(firebaseRefs.db, 'artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey, 'categories', catId));
+    await batch.commit();
+    if (currentCategoryId === catId) setCurrentCategoryId(null);
+  };
+
   const handleAddDishToLib = async () => {
     const val = newDishName.trim();
     if (!val || !currentCategoryId) return;
@@ -200,27 +222,54 @@ export default function App() {
 
   const handleExcelUpload = (e) => {
     const file = e.target.files[0];
-    if (!file || !currentCategoryId || !window.XLSX) return;
-    setIsImporting(true);
+    if (!file || !currentCategoryId) return;
+
     const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target.result;
-        const wb = window.XLSX.read(bstr, { type: 'binary' });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = window.XLSX.utils.sheet_to_json(ws);
-        const batch = writeBatch(firebaseRefs.db);
+    reader.onload = (evt) => {
+      const bstr = evt.target.result;
+      const wb = XLSX.read(bstr, { type: 'binary' });
+      const extractedNames = new Set();
+
+      wb.SheetNames.forEach(sheetName => {
+        const ws = wb.Sheets[sheetName];
+        // Convert to 2D array [row][column]
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
         data.forEach(row => {
-          const val = Object.values(row)[0];
-          if (val) {
-            const dRef = doc(getHubRef('dishes'));
-            batch.set(dRef, { name: String(val).trim(), categoryId: currentCategoryId, createdAt: Date.now() });
-          }
+          row.forEach(cell => {
+            if (cell != null) {
+              const val = String(cell).trim();
+              // Filter out single characters or empty numbers
+              if (val.length > 1) extractedNames.add(val);
+            }
+          });
         });
-        await batch.commit();
-      } finally { setIsImporting(false); e.target.value = ''; }
+      });
+
+      // Staging: allow user to review before writing to Firestore
+      setImportPendingList(
+        Array.from(extractedNames).map(name => ({
+          name,
+          selected: true
+        }))
+      );
+      setIsImporting(true);
     };
     reader.readAsBinaryString(file);
+    e.target.value = '';
+  };
+
+  const confirmImport = async () => {
+    const selected = importPendingList.filter(i => i.selected);
+    if (selected.length === 0) return;
+    const batch = writeBatch(firebaseRefs.db);
+    selected.forEach(item => {
+      const dRef = doc(collection(firebaseRefs.db, 'artifacts', appId, 'public', 'data', 'hubs', activeProfile.hubKey, 'dishes'));
+      batch.set(dRef, { name: item.name, categoryId: currentCategoryId, createdAt: Date.now() });
+    });
+    await batch.commit();
+    setImportPendingList([]);
+    setIsImporting(false);
   };
 
   if (!isConfigReady) return (
@@ -570,22 +619,57 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     {(categories || []).map(cat => (
-                      <button 
-                        key={cat.id} 
-                        onClick={() => setCurrentCategoryId(cat.id)} 
+                      <div
+                        key={cat.id}
                         className="w-full flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100"
                       >
-                        <div className="flex items-center gap-3">
-                          <Tag size={16} className="text-indigo-500" />
-                          <span className="font-bold text-slate-700 uppercase text-xs">{cat.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[9px] font-bold text-slate-300 uppercase">
-                            {(dishes || []).filter(d => d.categoryId === cat.id).length} Dishes
-                          </span>
-                          <ChevronRightIcon size={14} className="text-slate-300" />
-                        </div>
-                      </button>
+                        {editingCategory === cat.id ? (
+                          <div className="flex items-center gap-2 flex-1">
+                            <input
+                              type="text"
+                              value={editingCategoryName}
+                              onChange={(e) => setEditingCategoryName(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleEditCategory()}
+                              className="flex-1 px-3 py-2 bg-white rounded-xl font-bold text-xs outline-none border border-indigo-200"
+                              autoFocus
+                            />
+                            <button onClick={handleEditCategory} className="p-2 bg-indigo-600 text-white rounded-xl">
+                              <CheckCircle2 size={14} />
+                            </button>
+                            <button onClick={() => { setEditingCategory(null); setEditingCategoryName(''); }} className="p-2 bg-slate-200 text-slate-600 rounded-xl">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => setCurrentCategoryId(cat.id)}
+                              className="flex items-center gap-3 flex-1"
+                            >
+                              <Tag size={16} className="text-indigo-500" />
+                              <span className="font-bold text-slate-700 uppercase text-xs">{cat.name}</span>
+                              <span className="text-[9px] font-bold text-slate-300 uppercase">
+                                {(dishes || []).filter(d => d.categoryId === cat.id).length} Dishes
+                              </span>
+                            </button>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => { setEditingCategory(cat.id); setEditingCategoryName(cat.name); }}
+                                className="p-2 text-slate-300 hover:text-indigo-500 rounded-xl"
+                              >
+                                <Info size={14} />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteCategory(cat.id)}
+                                className="p-2 text-slate-300 hover:text-red-500 rounded-xl"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                              <ChevronRightIcon size={14} className="text-slate-300 self-center" />
+                            </div>
+                          </>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -606,10 +690,48 @@ export default function App() {
                   </div>
 
                   <label className="flex items-center justify-center gap-3 px-5 py-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-dashed border-emerald-200 cursor-pointer">
-                    <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} disabled={isImporting} />
+                    <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleExcelUpload} disabled={isImporting && importPendingList.length > 0} />
                     <FileUp size={18} />
-                    <span className="text-xs font-bold uppercase">{isImporting ? 'Processing...' : 'Bulk Upload'}</span>
+                    <span className="text-xs font-bold uppercase">Bulk Upload</span>
                   </label>
+
+                  {importPendingList.length > 0 && (
+                    <div className="bg-indigo-50 rounded-2xl p-4 border border-indigo-100 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <span className="text-xs font-bold text-indigo-700 uppercase">
+                          Import Review ({importPendingList.filter(i => i.selected).length} selected)
+                        </span>
+                        <button onClick={() => { setImportPendingList([]); setIsImporting(false); }} className="text-indigo-400 hover:text-indigo-600">
+                          <X size={16} />
+                        </button>
+                      </div>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {importPendingList.map((item, idx) => (
+                          <label key={idx} className="flex items-center gap-2 p-2 bg-white rounded-xl cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={item.selected}
+                              onChange={(e) => {
+                                const updated = [...importPendingList];
+                                updated[idx].selected = e.target.checked;
+                                setImportPendingList(updated);
+                              }}
+                              className="w-4 h-4 rounded accent-indigo-600"
+                            />
+                            <span className={`text-xs font-bold ${item.selected ? 'text-slate-700' : 'text-slate-400 line-through'}`}>
+                              {item.name}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        onClick={confirmImport}
+                        className="w-full py-3 bg-indigo-600 text-white rounded-xl text-xs font-bold uppercase"
+                      >
+                        Confirm Import ({importPendingList.filter(i => i.selected).length})
+                      </button>
+                    </div>
+                  )}
 
                   <div className="space-y-2 pb-10">
                     {(dishes || []).filter(d => d.categoryId === currentCategoryId).map(dish => (
