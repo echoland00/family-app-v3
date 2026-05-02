@@ -8,7 +8,7 @@ import {
   Utensils, ShoppingCart, Plus, CheckCircle2, Circle, Trash2, RefreshCw,
   ChevronLeft, ChevronRight, Sparkles, X, Home, Fingerprint, ShieldCheck,
   FileUp, PlusCircle, KeyRound, Zap, FolderPlus, ChevronRight as ChevronRightIcon,
-  Tag, LayoutGrid, Info, StickyNote, Send, Download
+  Tag, LayoutGrid, Info, StickyNote, Send, Download, BookOpen
 } from 'lucide-react';
 
 // Firebase Config
@@ -29,6 +29,50 @@ const SUGGESTED_MEALS = {
   Lunch: ['Chicken Caesar Salad', 'Tomato Soup', 'Turkey Club'],
   Snack: ['Fruit Bowl', 'Yogurt', 'Nuts', 'Hummus & Carrots'],
   Dinner: ['Spaghetti Carbonara', 'Grilled Salmon', 'Thai Green Curry']
+};
+
+const BIBLE_VERSES = [
+  { text: "The Lord is my shepherd; I shall not want.", source: "Psalm 23:1" },
+  { text: "I can do all things through Christ who strengthens me.", source: "Philippians 4:13" },
+  { text: "Trust in the Lord with all your heart.", source: "Proverbs 3:5" },
+  { text: "Be strong and courageous. Do not be afraid.", source: "Joshua 1:9" },
+  { text: "The Lord bless you and keep you.", source: "Numbers 6:24" },
+  { text: "God is love.", source: "1 John 4:8" },
+  { text: "Fear not, for I am with you.", source: "Isaiah 43:5" },
+  { text: "The truth will set you free.", source: "John 8:32" },
+  { text: "Love is patient, love is kind.", source: "1 Corinthians 13:4" },
+  { text: "With God all things are possible.", source: "Matthew 19:26" },
+  { text: "Do to others as you would have them do to you.", source: "Luke 6:31" },
+  { text: "The light shines in the darkness, and the darkness has not overcome it.", source: "John 1:5" },
+  { text: "Ask and it will be given to you.", source: "Matthew 7:7" },
+  { text: "Be kind to one another.", source: "Ephesians 4:32" },
+  { text: "The Spirit of God dwells in you.", source: "1 Corinthians 3:16" },
+  { text: "Your word is a lamp to my feet.", source: "Psalm 119:105" },
+  { text: "Jesus Christ is the same yesterday and today and forever.", source: "Hebrews 13:8" },
+  { text: "Be joyful in hope, patient in affliction.", source: "Romans 12:12" },
+  { text: "The name of the Lord is a strong tower.", source: "Proverbs 18:10" },
+  { text: "He heals the brokenhearted.", source: "Psalm 34:18" },
+  { text: "Walk by faith, not by sight.", source: "2 Corinthians 5:7" },
+  { text: "The Lord is near to the brokenhearted.", source: "Psalm 34:18" },
+  { text: "All things work together for good.", source: "Romans 8:28" },
+  { text: "Whoever believes in me shall have eternal life.", source: "John 6:47" },
+  { text: "Let your light shine before others.", source: "Matthew 5:16" },
+  { text: "Peace I leave with you; my peace I give you.", source: "John 14:27" },
+  { text: "Come to me, all who are weary.", source: "Matthew 11:28" },
+  { text: "For where two or three gather, I am there among them.", source: "Matthew 18:20" },
+  { text: "This is the day the Lord has made.", source: "Psalm 118:24" },
+  { text: "Be transformed by the renewing of your mind.", source: "Romans 12:2" },
+  { text: "高清牧者是我的磐石。", source: "詩篇 23:1" },
+  { text: "靠著那加給我力量的，凡事都能做。", source: "腓立比書 4:13" },
+  { text: "你要專心倚靠耶和華。", source: "箴言 3:5" },
+  { text: "你當剛強壯膽，不要懼怕。", source: "約書亞記 1:9" }
+];
+
+const getTodayVerse = () => {
+  const today = new Date().toISOString().split('T')[0];
+  const seed = today.split('-').join('') + today.split('-')[1];
+  const idx = parseInt(seed, 10) % BIBLE_VERSES.length;
+  return BIBLE_VERSES[idx];
 };
 
 export default function App() {
@@ -57,6 +101,8 @@ export default function App() {
   const [dishes, setDishes] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  const [todayVerse] = useState(getTodayVerse);
 
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
   const [currentCategoryId, setCurrentCategoryId] = useState(null);
@@ -497,6 +543,20 @@ export default function App() {
                 </div>
               );
             })}
+
+            {/* Bible Verse - shown after all meals */}
+            <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-[2rem] p-6 border border-indigo-100 shadow-sm">
+              <div className="flex items-center gap-2 mb-3">
+                <BookOpen size={14} className="text-indigo-500" />
+                <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Daily Verse</span>
+              </div>
+              <p className="text-sm font-bold text-indigo-900 leading-relaxed mb-2 italic">
+                "{todayVerse.text}"
+              </p>
+              <p className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
+                — {todayVerse.source}
+              </p>
+            </div>
           </div>
         )}
 
